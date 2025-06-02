@@ -36,11 +36,22 @@ RESULTS_DIR.mkdir(exist_ok=True)
 # Verificar si CrewAI está disponible
 CREWAI_AVAILABLE = False
 try:
-    from cadastro_crew.crew import CadastroCrew
-    CREWAI_AVAILABLE = True
-    logger.info("✅ CrewAI disponible - análisis real habilitado")
-except ImportError as e:
-    logger.warning(f"⚠️ CrewAI no disponible - modo simulación: {e}")
+    # Intentar importar desde diferentes ubicaciones
+    try:
+        from cadastro_crew.crew import CadastroCrew
+        CREWAI_AVAILABLE = True
+        logger.info("✅ CrewAI disponible - análisis real habilitado (desde cadastro_crew.crew)")
+    except ImportError:
+        try:
+            from cadastro_crew.main import CadastroCrew
+            CREWAI_AVAILABLE = True
+            logger.info("✅ CrewAI disponible - análisis real habilitado (desde cadastro_crew.main)")
+        except ImportError as e:
+            logger.warning(f"⚠️ CrewAI no disponible - modo simulación: {e}")
+            CREWAI_AVAILABLE = False
+except Exception as e:
+    logger.warning(f"⚠️ Error general al importar CrewAI - modo simulación: {e}")
+    CREWAI_AVAILABLE = False
 
 app = FastAPI(
     title=SERVICE_NAME,
