@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🤖 CrewAI Analysis Service
 
 Servicio modular para análisis de documentos usando CrewAI con comunicación HTTP directa.
@@ -54,3 +55,7 @@ Este servicio:
 ## 📦 Dependencias
 
 Ver `requirements.txt` para la lista completa de dependencias incluyendo CrewAI, LangChain y herramientas especializadas. 
+=======
+# pipefy-crewai-analysis-modular
+🤖 Servicio modular CrewAI para análisis inteligente de documentos
+>>>>>>> fa681ad931275845faf8c6b9d5b555b591059622
