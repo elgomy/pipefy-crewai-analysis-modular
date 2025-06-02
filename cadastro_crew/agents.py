@@ -3,10 +3,42 @@ from pathlib import Path
 from crewai import Agent
 from crewai_tools import SerperDevTool
 
-# Importar ferramentas customizadas
-from .tools.llama_cloud_parsing_tool import LlamaParseDirectTool # Importar a ferramenta de parseo
-from .tools import KnowledgeBaseQueryTool
-from .tools import SupabaseDocumentContentTool # Nova ferramenta
+# Importar ferramentas customizadas con fallbacks robustos
+try:
+    from .tools.llama_cloud_parsing_tool import LlamaParseDirectTool
+    LLAMA_PARSE_AVAILABLE = True
+except ImportError as e:
+    print(f"WARNING: LlamaParseDirectTool no disponible: {e}")
+    LlamaParseDirectTool = None
+    LLAMA_PARSE_AVAILABLE = False
+
+try:
+    from .tools import KnowledgeBaseQueryTool
+    KB_TOOL_AVAILABLE = True
+except ImportError as e:
+    print(f"WARNING: KnowledgeBaseQueryTool no disponible: {e}")
+    KnowledgeBaseQueryTool = None
+    KB_TOOL_AVAILABLE = False
+
+# Intentar importar la herramienta original, si falla usar la simplificada
+try:
+    from .tools import SupabaseDocumentContentTool
+    SUPABASE_TOOL_AVAILABLE = True
+    USING_SIMPLE_TOOL = False
+    print("INFO: Usando SupabaseDocumentContentTool original")
+except ImportError as e:
+    print(f"WARNING: SupabaseDocumentContentTool original no disponible: {e}")
+    try:
+        from .tools.simple_supabase_tool import get_supabase_document_info
+        SupabaseDocumentContentTool = get_supabase_document_info
+        SUPABASE_TOOL_AVAILABLE = True
+        USING_SIMPLE_TOOL = True
+        print("INFO: Usando herramienta Supabase simplificada")
+    except ImportError as e2:
+        print(f"ERROR: Ninguna herramienta Supabase disponible: {e2}")
+        SupabaseDocumentContentTool = None
+        SUPABASE_TOOL_AVAILABLE = False
+        USING_SIMPLE_TOOL = False
 
 # Carregar configurações dos agentes do arquivo YAML
 agents_config_path = Path(__file__).parent / 'config/agents.yaml'
@@ -29,17 +61,55 @@ class CadastroAgents:
         # Isto garante que são criadas APÓS load_dotenv() em main.py ter sido chamado,
         # assumindo que CadastroAgents() é chamado depois disso.
         print("INFO (CadastroAgents): Inicializando ferramentas...")
-        self.serper_tool = SerperDevTool()
-        self.kb_tool = KnowledgeBaseQueryTool()
-        self.supabase_doc_tool = SupabaseDocumentContentTool()
         
-        # Hacer LlamaCloud opcional
-        try:
-            self.llama_parse_tool = LlamaParseDirectTool()
-            self.llama_available = True
-            print("INFO (CadastroAgents): LlamaCloud disponible.")
-        except ValueError as e:
-            print(f"WARNING (CadastroAgents): LlamaCloud no disponible: {e}")
+        # SerperDevTool siempre disponível
+        self.serper_tool = SerperDevTool()
+        
+        # Knowledge Base Tool
+        if KB_TOOL_AVAILABLE:
+            try:
+                self.kb_tool = KnowledgeBaseQueryTool()
+                self.kb_available = True
+                print("INFO (CadastroAgents): KnowledgeBaseQueryTool disponible.")
+            except Exception as e:
+                print(f"WARNING (CadastroAgents): Error al inicializar KnowledgeBaseQueryTool: {e}")
+                self.kb_tool = None
+                self.kb_available = False
+        else:
+            self.kb_tool = None
+            self.kb_available = False
+        
+        # Supabase Tool
+        if SUPABASE_TOOL_AVAILABLE:
+            try:
+                if USING_SIMPLE_TOOL:
+                    # La herramienta simplificada ya es una función decorada
+                    self.supabase_doc_tool = SupabaseDocumentContentTool
+                    print("INFO (CadastroAgents): Herramienta Supabase simplificada disponible.")
+                else:
+                    # Herramienta original que necesita instanciación
+                    self.supabase_doc_tool = SupabaseDocumentContentTool()
+                    print("INFO (CadastroAgents): SupabaseDocumentContentTool original disponible.")
+                self.supabase_available = True
+            except Exception as e:
+                print(f"WARNING (CadastroAgents): Error al inicializar herramienta Supabase: {e}")
+                self.supabase_doc_tool = None
+                self.supabase_available = False
+        else:
+            self.supabase_doc_tool = None
+            self.supabase_available = False
+        
+        # LlamaParse Tool
+        if LLAMA_PARSE_AVAILABLE:
+            try:
+                self.llama_parse_tool = LlamaParseDirectTool()
+                self.llama_available = True
+                print("INFO (CadastroAgents): LlamaCloud disponible.")
+            except Exception as e:
+                print(f"WARNING (CadastroAgents): LlamaCloud no disponible: {e}")
+                self.llama_parse_tool = None
+                self.llama_available = False
+        else:
             self.llama_parse_tool = None
             self.llama_available = False
             
@@ -47,7 +117,12 @@ class CadastroAgents:
 
     def triagem_validador_agente(self) -> Agent:
         config = agents_config['triagem_agente']
-        tools = [self.supabase_doc_tool, self.kb_tool]
+        tools = []
+        
+        if self.supabase_available:
+            tools.append(self.supabase_doc_tool)
+        if self.kb_available:
+            tools.append(self.kb_tool)
         if self.llama_available:
             tools.append(self.llama_parse_tool)
             
@@ -58,12 +133,14 @@ class CadastroAgents:
             verbose=config.get('verbose', True),
             allow_delegation=config.get('allow_delegation', False),
             tools=tools,
-            # llm=seu_llm_configurado # Opcional: se quiser um LLM específico para este agente
         )
 
     def extrator_info_agente(self) -> Agent:
         config = agents_config['extrator_agente']
-        tools = [self.supabase_doc_tool]
+        tools = []
+        
+        if self.supabase_available:
+            tools.append(self.supabase_doc_tool)
         if self.llama_available:
             tools.append(self.llama_parse_tool)
             
@@ -74,12 +151,17 @@ class CadastroAgents:
             verbose=config.get('verbose', True),
             allow_delegation=config.get('allow_delegation', False),
             tools=tools,
-            # llm=seu_llm_configurado
         )
 
     def analista_risco_agente(self) -> Agent:
         config = agents_config['risco_agente']
-        tools = [self.supabase_doc_tool, self.serper_tool, self.kb_tool]
+        tools = []
+        
+        if self.supabase_available:
+            tools.append(self.supabase_doc_tool)
+        tools.append(self.serper_tool)  # SerperDevTool siempre disponible
+        if self.kb_available:
+            tools.append(self.kb_tool)
         if self.llama_available:
             tools.append(self.llama_parse_tool)
             
@@ -90,7 +172,6 @@ class CadastroAgents:
             verbose=config.get('verbose', True),
             allow_delegation=config.get('allow_delegation', False),
             tools=tools,
-            # llm=seu_llm_configurado
         )
 
 # Exemplo de como você poderia usar esta classe em seu crew.py:
