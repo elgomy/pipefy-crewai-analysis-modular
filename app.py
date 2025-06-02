@@ -60,6 +60,21 @@ try:
     try:
         import crewai
         logger.info(f"✅ CrewAI base importado - versión: {getattr(crewai, '__version__', 'unknown')}")
+        
+        # Verificar que BaseTool esté disponible
+        try:
+            from crewai.tools import BaseTool
+            logger.info("✅ BaseTool importado correctamente desde crewai.tools")
+        except ImportError as bt_error:
+            logger.error(f"❌ No se puede importar BaseTool desde crewai.tools: {bt_error}")
+            # Intentar ubicaciones alternativas
+            try:
+                from crewai.tools.base_tool import BaseTool
+                logger.info("✅ BaseTool importado desde crewai.tools.base_tool (ubicación alternativa)")
+            except ImportError as bt_error2:
+                logger.error(f"❌ BaseTool tampoco disponible en crewai.tools.base_tool: {bt_error2}")
+                raise ImportError(f"BaseTool no disponible en ninguna ubicación conocida")
+        
     except ImportError as e:
         logger.error(f"❌ No se puede importar crewai base: {e}")
         raise
