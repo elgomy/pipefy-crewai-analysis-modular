@@ -33,12 +33,36 @@ SERVICE_PORT = int(os.getenv("CREWAI_SERVICE_PORT", "8002"))
 RESULTS_DIR = Path("analysis_results")
 RESULTS_DIR.mkdir(exist_ok=True)
 
+# Verificar variables de entorno críticas
+logger.info("🔍 Verificando variables de entorno...")
+required_env_vars = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_KEY"]
+missing_vars = []
+
+for var in required_env_vars:
+    if not os.getenv(var):
+        missing_vars.append(var)
+    else:
+        logger.info(f"✅ {var}: configurada")
+
+if missing_vars:
+    logger.warning(f"⚠️ Variables de entorno faltantes: {missing_vars}")
+else:
+    logger.info("✅ Todas las variables de entorno críticas están configuradas")
+
 # Verificar si CrewAI está disponible
 CREWAI_AVAILABLE = False
 CadastroCrew = None
 
 try:
     logger.info("🔍 Intentando importar CrewAI...")
+    
+    # Verificar primero las dependencias básicas
+    try:
+        import crewai
+        logger.info(f"✅ CrewAI base importado - versión: {getattr(crewai, '__version__', 'unknown')}")
+    except ImportError as e:
+        logger.error(f"❌ No se puede importar crewai base: {e}")
+        raise
     
     # Intentar importar desde diferentes ubicaciones
     try:
