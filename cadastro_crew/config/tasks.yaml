@@ -1,0 +1,113 @@
+# Arquivo: src/config/tasks.yaml
+# Define as descrições e saídas esperadas para as tarefas dos agentes.
+# A atribuição do agente e das ferramentas a cada tarefa será feita no código Python
+# (ex: src/seu_projeto/tasks.py ou src/seu_projeto/crew.py).
+
+# Tarefas para o Agente Triagem e Validação Documental
+tarefa_validacao_documental:
+  description: |
+    Realize uma análise completa e rigorosa de todos os documentos fornecidos para o caso '{case_id}'.
+    Para cada documento na lista '{documents}', primeiro utilize a ferramenta 'Supabase Document Info Retriever' passando o nome do arquivo (a chave 'name' de cada item da lista '{documents}') E o ID do caso ('{case_id}') para obter um JSON contendo a URL do arquivo ('file_url') e outros metadados.
+    Em seguida, extraia a 'file_url' do JSON retornado e utilize a ferramenta 'LlamaParse Direct Document Parser' passando essa 'file_url' para obter o conteúdo textual parseado do documento. Assegure-se de usar o preset de parseamento 'simple' e resultado como markdown (que são os padrões da ferramenta).
+    Após obter o conteúdo parseado de cada documento, verifique sua presença, legibilidade básica e conformidade com CADA item do checklist normativo brasileiro fornecido no parâmetro '{checklist}'.
+    O checklist detalha os critérios para:
+    a) Documentos Cadastrais da PJ.
+    b) Documentos Financeiros da PJ.
+    c) Documentos dos Sócios / Representantes.
+
+    Certifique-se de considerar todas as regras de data (ex: "Emitido nos últimos 90 dias", "defasagem máxima de 2 meses em relação à data atual '{current_date}'") e outros requisitos específicos mencionados no '{checklist}'.
+
+    Consulte a 'Knowledge Base Query Tool' com a query "políticas de validação para [tipo de documento específico]" ou "exceções conhecidas para [item do checklist]" se encontrar ambiguidades ou situações não claramente cobertas pelo '{checklist}' ou se o '{checklist}' indicar a necessidade de consulta para regras mais detalhadas.
+    Seu output deve ser um relatório detalhado.
+  expected_output: |
+    Um relatório estruturado (preferencialmente JSON ou Markdown formatado) detalhando, para CADA item do checklist fornecido:
+    1. Nome do Documento/Item do Checklist.
+    2. Documento Correspondente Encontrado (Sim/Não/Não Aplicável).
+    3. Arquivo(s) Analisado(s) para este item (nome do arquivo ou a file_url usada para o parseamento).
+    4. Status da Validação (Conforme/Não Conforme/Pendência/Não Aplicável).
+    5. Observações Claras e Concisas: Detalhar o motivo de qualquer "Não Conforme" ou "Pendência" (ex: "Cartão CNPJ emitido há 120 dias - FORA DO PRAZO", "Faturamento não assinado pelo contador", "Comprovante de residência do sócio X com data de emissão superior a 90 dias"), referenciando a regra específica do checklist.
+    6. Referência da Knowledge Base (se consultada e relevante para a decisão).
+    O relatório deve ser completo, cobrindo todos os aspectos do checklist.
+  # agent: será atribuído em Python
+
+# Tarefas para o Agente Extrator de Informações
+tarefa_extracao_dados:
+  description: |
+    Para o caso '{case_id}', processe todos os documentos relevantes listados em '{documents}'. 
+    Para cada documento na lista '{documents}', primeiro utilize a ferramenta 'Supabase Document Info Retriever' passando o nome do arquivo (a chave 'name' de cada item da lista '{documents}') E o ID do caso ('{case_id}') para obter um JSON contendo a URL do arquivo ('file_url') e outros metadados.
+    Em seguida, extraia a 'file_url' do JSON retornado e utilize a ferramenta 'LlamaParse Direct Document Parser' passando essa 'file_url' para obter o conteúdo textual parseado do documento. Assegure-se de usar o preset de parseamento 'simple' e resultado como markdown.
+    Uma vez que tenha o conteúdo textual parseado de um documento, sua missão é extrair meticulosamente os seguintes campos de informação para a montagem de um dossiê cadastral completo. Seja exaustivo e preciso.
+    Campos a Extrair:
+    1.  Da Pessoa Jurídica (PJ):
+        - Razão Social Completa
+        - Nome Fantasia (se houver)
+        - CNPJ (formatado)
+        - Data de Constituição/Abertura da Empresa
+        - Endereço Completo da Sede (Logradouro, Número, Complemento, Bairro, Cidade, UF, CEP)
+        - Natureza Jurídica (conforme Contrato/Estatuto Social)
+        - Capital Social (Valor e Moeda)
+        - Objeto Social (resumido)
+        - Telefone Principal (se encontrado)
+        - Email Principal (se encontrado)
+    2.  Dos Sócios/Acionistas e Representantes Legais (para cada um identificado, incluindo procuradores se aplicável):
+        - Nome Completo
+        - CPF (formatado)
+        - RG (Número, Órgão Emissor, UF Emissora, Data de Emissão - se disponível)
+        - Data de Nascimento (se disponível)
+        - Nacionalidade
+        - Estado Civil (se disponível)
+        - Profissão (se disponível)
+        - Endereço Residencial Completo (Logradouro, Número, Complemento, Bairro, Cidade, UF, CEP)
+        - Participação Societária (%) (para sócios/acionistas)
+        - Cargo/Função na empresa (ex: Sócio Administrador, Diretor, Procurador)
+        - Data de Admissão/Eleição para o cargo (se aplicável e disponível)
+    3.  Informações Financeiras da PJ:
+        - Faturamento dos últimos 12 meses (detalhado por mês se disponível no documento, ou o valor total e o período exato coberto. Ex: "R$ X.XXX.XXX,XX de JAN/2023 a DEZ/2023").
+        - Nome do Contador responsável pela assinatura do faturamento.
+        - Número de registro do Contador no CRC (Conselho Regional de Contabilidade).
+    4.  Outras Informações Relevantes:
+        - Número de registro do Contrato/Estatuto Social no órgão competente (Junta Comercial, Cartório).
+        - Data do último registro/alteração contratual.
+        - Quaisquer outras informações que você julgue cruciais para um dossiê cadastral completo.
+  expected_output: |
+    Um objeto JSON estritamente estruturado contendo todas as informações extraídas.
+    O JSON deve ter chaves principais como 'dadosPessoaJuridica', 'dadosSociosRepresentantes' (uma lista de objetos, um para cada sócio/representante), e 'dadosFinanceiros'.
+    Exemplo de estrutura para um sócio:
+    { "nomeCompleto": "...", "cpf": "...", "enderecoResidencial": { "logradouro": "...", ... }, "participacaoSocietaria": "X%" }
+    Se uma informação não for encontrada em nenhum documento, o campo correspondente no JSON deve ter o valor null ou uma string vazia. Não omita campos.
+  # agent: será atribuído em Python
+
+# Tarefas para o Agente Analista de Risco
+tarefa_analise_risco_inconsistencias:
+  description: |
+    Sua missão é conduzir uma análise de risco aprofundada para o caso '{case_id}'.
+    **Baseie-se EXCLUSIVAMENTE no relatório de validação documental e no dossiê cadastral completo fornecidos no seu CONTEXTO.**
+    **NÃO utilize as ferramentas 'Supabase Document Info Retriever' ou 'LlamaParse Direct Document Parser' para esta tarefa de análise de risco, pois os documentos já foram processados nas etapas anteriores e seus conteúdos relevantes estão no dossiê.**
+
+    Siga estes passos:
+    1.  Revise o **relatório de validação documental provido no contexto**. Se houver pendências críticas (ex: documentos ausentes, ilegíveis ou flagrantemente inválidos conforme o relatório de validação), destaque-as claramente em seu parecer final.
+    2.  Cruze TODAS as informações presentes no **dossiê cadastral completo (provido no contexto)**. Identifique e liste CADA divergência encontrada entre os dados consolidados neste dossiê (ex: diferença de nome do sócio entre o que consta na seção PJ e na seção de sócios do dossiê, datas inconsistentes, etc.). Não tente re-validar estas informações parseando documentos novamente.
+    3.  Do dossiê cadastral completo (disponível no seu contexto), obtenha o CNPJ da empresa e os CPFs dos sócios/representantes. Utilize a ferramenta 'Serper Search Tool' para validar estas informações públicas. Verifique:
+        - Situação cadastral do CNPJ (obtido do contexto) em fontes oficiais (Receita Federal).
+        - Reputação da empresa e sócios (usando o CNPJ e CPFs obtidos do contexto) (notícias, processos, reclamações).
+        - Confirmação de endereços (Google Maps, sites oficiais).
+    4.  Do dossiê cadastral, obtenha também o CNPJ, CPF do sócio principal e faturamento (se disponível). Consulte a 'Knowledge Base Query Tool' com queries como "padrões de fraude para empresas do setor X no Brasil", "alertas de risco para CNPJ [CNPJ do contexto]", "histórico de inconsistências para sócio com CPF [CPF do sócio principal do contexto]", ou "casos similares de validação para empresas com faturamento na faixa de [faturamento do contexto]".
+    5.  Com base em todas as análises (pendências do relatório de validação, divergências internas do dossiê, validação web, consulta à KB), elabore um parecer de risco. **O seu "Final Answer" DEVE SER este parecer de risco completo, seguindo ESTRITAMENTE o formato detalhado em 'expected_output'. Não retorne dados parciais ou entradas de ferramentas como sua resposta final.**
+  expected_output: |
+    Um relatório consolidado em formato Markdown contendo as seguintes seções:
+    1.  **Sumário do Caso:** Breve resumo do caso '{case_id}'.
+    2.  **Principais Pendências Documentais (se houver):** Listar as pendências mais críticas identificadas pelo Agente de Triagem.
+    3.  **Relatório Detalhado de Inconsistências:**
+        - Para cada inconsistência encontrada:
+            - Descrição da divergência.
+            - Documentos onde a divergência foi observada.
+            - Informação encontrada no Documento A vs. Informação no Documento B.
+    4.  **Resultados da Verificação Externa (Web):**
+        - Resumo das descobertas para o CNPJ (situação, reputação).
+        - Resumo das descobertas para os principais sócios (se houver algo relevante).
+    5.  **Insights da Knowledge Base:**
+        - Resumo das informações relevantes obtidas da Knowledge Base que influenciaram a análise.
+    6.  **Parecer de Risco:** Uma análise conclusiva sobre o nível de risco cadastral/fraude percebido, justificando a avaliação.
+    7.  **Score de Risco:** Uma classificação categórica: "Baixo", "Médio", ou "Alto".
+  # agent: será atribuído em Python
+  # output_file: opcional, se quiser salvar diretamente em um arquivo. Ex: 'report_analise_risco.md'
