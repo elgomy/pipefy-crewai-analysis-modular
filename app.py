@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Servicio CrewAI - Versión HTTP Directa
+Servicio CrewAI - Versión HTTP Direct
 Se enfoca únicamente en el análisis de documentos usando CrewAI.
 Recibe llamadas HTTP directas del servicio de ingestión de documentos.
 MANTIENE LA MODULARIDAD: Cada servicio tiene su responsabilidad específica.
@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from pathlib import Path
 import json
+import sys
 
 # Cargar variables de entorno
 load_dotenv()
@@ -115,7 +116,7 @@ CHECKLIST DE CADASTRO PESSOA JURÍDICA
 async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> AnalysisResult:
     """Analiza documentos usando CrewAI."""
     try:
-        logger.info(f"🔍 Iniciando análisis CrewAI para case_id: {request.case_id}")
+        logger.info(f"�� Iniciando análisis CrewAI para case_id: {request.case_id}")
         logger.info(f"📄 Documentos a analizar: {len(request.documents)}")
         logger.info(f"📋 Checklist URL: {request.checklist_url}")
         
@@ -351,6 +352,53 @@ async def service_status():
         },
         "timestamp": datetime.now().isoformat()
     }
+
+@app.get("/debug/imports")
+async def debug_imports():
+    """Endpoint para diagnosticar problemas de importación"""
+    debug_info = {
+        "crewai_available": CREWAI_AVAILABLE,
+        "import_attempts": [],
+        "python_path": sys.path[:5],  # Primeros 5 paths
+        "installed_packages": {}
+    }
+    
+    # Intentar importaciones paso a paso
+    try:
+        import crewai
+        debug_info["import_attempts"].append({"module": "crewai", "success": True, "version": getattr(crewai, "__version__", "unknown")})
+    except Exception as e:
+        debug_info["import_attempts"].append({"module": "crewai", "success": False, "error": str(e)})
+    
+    try:
+        from crewai import Agent, Task, Crew
+        debug_info["import_attempts"].append({"module": "crewai.core", "success": True})
+    except Exception as e:
+        debug_info["import_attempts"].append({"module": "crewai.core", "success": False, "error": str(e)})
+    
+    try:
+        from crewai.project import CrewBase
+        debug_info["import_attempts"].append({"module": "crewai.project", "success": True})
+    except Exception as e:
+        debug_info["import_attempts"].append({"module": "crewai.project", "success": False, "error": str(e)})
+    
+    try:
+        from cadastro_crew.crew import CadastroCrew
+        debug_info["import_attempts"].append({"module": "cadastro_crew.crew", "success": True})
+    except Exception as e:
+        debug_info["import_attempts"].append({"module": "cadastro_crew.crew", "success": False, "error": str(e)})
+    
+    # Verificar paquetes instalados
+    try:
+        import pkg_resources
+        installed = [d.project_name for d in pkg_resources.working_set]
+        crewai_packages = [p for p in installed if 'crew' in p.lower()]
+        debug_info["installed_packages"]["crewai_related"] = crewai_packages
+        debug_info["installed_packages"]["total_packages"] = len(installed)
+    except Exception as e:
+        debug_info["installed_packages"]["error"] = str(e)
+    
+    return debug_info
 
 async def save_analysis_result_to_markdown(result: "AnalysisResult") -> str:
     """Guarda el resultado del análisis en un archivo Markdown."""
