@@ -2,8 +2,9 @@ import os
 import tempfile
 import asyncio
 import httpx # Usado para baixar arquivos de URLs
-from typing import Type, Optional, Literal, List, Any, Union
+from typing import Type, Optional, Literal, List, Any
 from pydantic import BaseModel, Field, validator # MODIFICADO: Usar pydantic (V2)
+from crewai.tools import BaseTool
 from dotenv import load_dotenv
 # import llamacloud # Removido - não é necessário, já que usamos llama_parse diretamente
 import logging # Adicionado para o logger que já existe
@@ -25,25 +26,6 @@ except ImportError:
 
 # Configuração básica de logging para a ferramenta
 logger = logging.getLogger(__name__)
-
-# Intentar importar BaseTool, con fallback al decorador @tool
-try:
-    from crewai.tools import BaseTool
-    BASETOOL_AVAILABLE = True
-    logger.info("✅ BaseTool importado correctamente desde crewai.tools")
-except ImportError:
-    try:
-        from crewai.tools.base_tool import BaseTool
-        BASETOOL_AVAILABLE = True
-        logger.info("✅ BaseTool importado desde crewai.tools.base_tool (ubicación alternativa)")
-    except ImportError:
-        logger.warning("⚠️ BaseTool no disponible, usando decorador @tool como fallback")
-        BASETOOL_AVAILABLE = False
-        try:
-            from crewai.tools import tool
-        except ImportError:
-            logger.error("❌ Ni BaseTool ni @tool están disponibles")
-            raise ImportError("CrewAI tools no disponibles")
 
 # Carregar variáveis de ambiente. É bom ter isso no início do módulo.
 load_dotenv()
@@ -355,156 +337,3 @@ if __name__ == "__main__":
     # tool = LlamaParseDirectTool()
     # print(tool._run(file_path="dummy.pdf"))
     pass 
-
-# Funciones auxiliares para usar con el decorador @tool
-async def _download_file_if_url_standalone(file_path_or_url: str) -> str:
-    """Downloads a file from a URL to a temporary local path if it's a URL."""
-    if file_path_or_url.startswith("http://") or file_path_or_url.startswith("https://"):
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(file_path_or_url)
-                response.raise_for_status()
-            
-            possible_extension = ""
-            if '.' in file_path_or_url.split('/')[-1]:
-                possible_extension = "." + file_path_or_url.split('/')[-1].split('.')[-1]
-
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=possible_extension, mode='wb')
-            temp_file.write(response.content)
-            temp_file.close()
-            logger.info(f"Arquivo baixado de {file_path_or_url} para {temp_file.name}")
-            return temp_file.name
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Erro HTTP {e.response.status_code} ao baixar {file_path_or_url}: {e.response.text}")
-            return f"Error downloading file: HTTP error {e.response.status_code}"
-        except httpx.RequestError as e:
-            logger.error(f"Erro de requisição ao baixar {file_path_or_url}: {e}")
-            return f"Error downloading file: Request failed {e}"
-        except Exception as e:
-            logger.error(f"Erro inesperado ao baixar {file_path_or_url}: {e}")
-            return f"An unexpected error occurred while downloading the file: {e}"
-    return file_path_or_url
-
-def _get_parser_instance_standalone(preset: ParsingPreset, language: str, result_as_markdown: bool) -> LlamaParse:
-    """Configura e retorna uma instância do LlamaParse parser."""
-    api_key_to_use = LLAMA_CLOUD_API_KEY
-    if not api_key_to_use:
-        logger.error("LlamaCloud API Key não fornecida como variável de ambiente.")
-        raise ValueError("LLAMA_CLOUD_API_KEY não configurada.")
-
-    # Corrigir o código de idioma se for passado 'por'
-    actual_language = "pt" if language.lower() == "por" else language
-
-    # Usar strings diretamente para o modo, conforme a documentação de LlamaParse
-    mode_to_use_str = "detailed" if preset == "detailed" else "simple"
-
-    return LlamaParse(
-        api_key=api_key_to_use,
-        result_type="markdown" if result_as_markdown else "text",
-        language=actual_language,
-        mode=mode_to_use_str
-    )
-
-def _run_llama_parse_sync(
-    document_url: Optional[str] = None,
-    file_path: Optional[str] = None,
-    parsing_preset: ParsingPreset = "simple", 
-    parsing_instructions: Optional[str] = None,
-    language: str = "pt", 
-    result_as_markdown: bool = True
-) -> str:
-    """Función auxiliar para ejecutar LlamaParse de forma síncrona."""
-    if not document_url and not file_path:
-        return "Error: Either document_url or file_path must be provided."
-    
-    source_path = document_url if document_url else file_path
-    if source_path is None:
-         return "Error: Document source path is None after check, unexpected error."
-
-    logger.info(f"Iniciando parseamento síncrono para: {source_path}")
-    
-    actual_file_to_parse = source_path
-    temp_file_path_for_cleanup: Optional[str] = None
-
-    if source_path.startswith("http://") or source_path.startswith("https://"):
-        logger.info(f"Baixando arquivo para execução síncrona: {source_path}")
-        temp_file_obj = None
-        try:
-            with httpx.Client() as client:
-                response = client.get(source_path)
-                response.raise_for_status()
-            
-            possible_extension = ""
-            if '.' in source_path.split('/')[-1]:
-                possible_extension = "." + source_path.split('/')[-1].split('.')[-1]
-            
-            temp_file_obj = tempfile.NamedTemporaryFile(delete=False, suffix=possible_extension, mode='wb')
-            temp_file_obj.write(response.content)
-            actual_file_to_parse = temp_file_obj.name
-            temp_file_path_for_cleanup = actual_file_to_parse
-            temp_file_obj.close()
-            logger.info(f"Arquivo baixado para {actual_file_to_parse}")
-        except Exception as e_dl_sync:
-            logger.error(f"Erro ao baixar {source_path} sincronicamente: {e_dl_sync}")
-            if temp_file_obj and os.path.exists(temp_file_obj.name):
-                try:
-                    os.remove(temp_file_obj.name)
-                except Exception as e_rm_fail: 
-                    logger.warning(f"Falha ao remover arquivo temporário após erro de download: {temp_file_obj.name}, erro: {e_rm_fail}")
-            return f"Error downloading file synchronously: {e_dl_sync}"
-    
-    try:
-        parser = _get_parser_instance_standalone(parsing_preset, language, result_as_markdown)
-        
-        documents: List[Document] = parser.load_data(actual_file_to_parse) 
-        if not documents:
-            logger.warning(f"LlamaParse não retornou documentos para {actual_file_to_parse} (sync).")
-            return "LlamaParse did not return any documents (sync)."
-        
-        full_text = "\n\n---\n\n".join([doc.text for doc in documents if doc.text])
-        logger.info(f"Parseamento de {actual_file_to_parse} (sync) concluído. Tamanho do texto: {len(full_text)}")
-        return full_text if full_text else "LlamaParse returned document(s) with no textual content (sync)."
-
-    except FileNotFoundError:
-        logger.error(f"Arquivo não encontrado em {actual_file_to_parse} durante o parseamento (sync).")
-        return f"Error: File not found at {actual_file_to_parse} (sync)"
-    except Exception as e_parse_sync:
-        logger.exception(f"Erro durante parseamento síncrono de {actual_file_to_parse}: {e_parse_sync}")
-        if hasattr(e_parse_sync, 'response') and hasattr(e_parse_sync.response, 'text'):
-             return f"Error during LlamaParse processing (sync): {e_parse_sync.response.text} (Details: {str(e_parse_sync)})"
-        return f"An unexpected error occurred during synchronous LlamaParse processing: {e_parse_sync}"
-    finally:
-        if temp_file_path_for_cleanup and os.path.exists(temp_file_path_for_cleanup):
-            try:
-                os.remove(temp_file_path_for_cleanup)
-                logger.info(f"Arquivo temporário {temp_file_path_for_cleanup} removido (sync).")
-            except Exception as e_rm_sync:
-                logger.warning(f"Não foi possível remover o arquivo temporário {temp_file_path_for_cleanup} (sync): {e_rm_sync}")
-
-if BASETOOL_AVAILABLE:
-    # Versión usando BaseTool (preferida) - la clase ya existe arriba
-    pass
-else:
-    # Versión usando decorador @tool como fallback
-    from crewai.tools import tool
-    
-    @tool("LlamaParse Direct Document Parser")
-    def LlamaParseDirectTool(
-        document_url: Optional[str] = None,
-        file_path: Optional[str] = None,
-        parsing_preset: str = "simple", 
-        parsing_instructions: Optional[str] = None,
-        language: str = "pt", 
-        result_as_markdown: bool = True
-    ) -> str:
-        """Processa um documento (PDF, etc.) diretamente via URL ou caminho de arquivo usando LlamaParse da LlamaCloud para extrair seu conteúdo como markdown. Ideal para obter o texto de documentos para análise."""
-        # Convertir parsing_preset string a ParsingPreset
-        preset: ParsingPreset = "detailed" if parsing_preset == "detailed" else "simple"
-        return _run_llama_parse_sync(
-            document_url=document_url,
-            file_path=file_path,
-            parsing_preset=preset,
-            parsing_instructions=parsing_instructions,
-            language=language,
-            result_as_markdown=result_as_markdown
-        ) 
