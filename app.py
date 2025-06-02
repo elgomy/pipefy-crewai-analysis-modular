@@ -147,16 +147,22 @@ class AnalysisResult(BaseModel):
 async def download_checklist_content(checklist_url: str) -> str:
     """Descarga el contenido del checklist desde la URL."""
     try:
+        logger.info(f"📥 Descargando contenido del checklist...")
         logger.info(f"📥 Descargando checklist desde: {checklist_url}")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(checklist_url)
             response.raise_for_status()
             
-            # Si es un PDF, extraer texto (simplificado para este ejemplo)
+            # Si es un PDF, usar LlamaParse para extraer texto
             if checklist_url.lower().endswith('.pdf'):
-                logger.info("📄 Archivo PDF detectado - usando contenido simulado...")
-                return """
+                logger.info("📄 Archivo PDF detectado - extrayendo texto...")
+                
+                # Verificar si LlamaParse está disponible
+                llama_api_key = os.getenv("LLAMA_CLOUD_API_KEY")
+                if not llama_api_key:
+                    logger.warning("⚠️ LLAMA_CLOUD_API_KEY no configurada - usando contenido simulado...")
+                    return """
 CHECKLIST DE CADASTRO PESSOA JURÍDICA
 
 1. DOCUMENTOS OBRIGATÓRIOS:
@@ -171,7 +177,57 @@ CHECKLIST DE CADASTRO PESSOA JURÍDICA
    - Datas não podem estar vencidas
    - Assinaturas devem estar presentes
    - Informações devem ser consistentes entre documentos
-                """
+                    """
+                
+                try:
+                    # Intentar usar LlamaParse
+                    from llama_parse import LlamaParse
+                    import tempfile
+                    
+                    # Guardar el PDF temporalmente
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                        temp_file.write(response.content)
+                        temp_file_path = temp_file.name
+                    
+                    # Usar LlamaParse para extraer el contenido
+                    parser = LlamaParse(
+                        api_key=llama_api_key,
+                        result_type="markdown",
+                        language="pt"
+                    )
+                    
+                    documents = await parser.aload_data(temp_file_path)
+                    
+                    # Limpiar archivo temporal
+                    os.unlink(temp_file_path)
+                    
+                    if documents:
+                        content = "\n\n".join([doc.text for doc in documents if doc.text])
+                        logger.info(f"📄 Contenido extraído con LlamaParse: {len(content)} caracteres")
+                        return content
+                    else:
+                        logger.warning("⚠️ LlamaParse no retornó contenido - usando fallback")
+                        return "Error: No se pudo extraer contenido del PDF con LlamaParse"
+                        
+                except Exception as llama_error:
+                    logger.error(f"❌ Error con LlamaParse: {llama_error}")
+                    logger.warning("⚠️ Fallback a contenido simulado debido a error de LlamaParse")
+                    return """
+CHECKLIST DE CADASTRO PESSOA JURÍDICA
+
+1. DOCUMENTOS OBRIGATÓRIOS:
+   - Contrato Social atualizado
+   - Comprovante de residência da empresa
+   - Documento de identidade dos sócios
+   - Declaração de impostos (último ano)
+   - Certificado de registro na junta comercial
+
+2. CRITÉRIOS DE VALIDAÇÃO:
+   - Documentos devem estar legíveis
+   - Datas não podem estar vencidas
+   - Assinaturas devem estar presentes
+   - Informações devem ser consistentes entre documentos
+                    """
             else:
                 content = response.text
                 logger.info(f"📄 Contenido del checklist descargado: {len(content)} caracteres")
@@ -400,7 +456,7 @@ async def root():
 
 @app.get("/status")
 async def service_status():
-    """Endpoint detallado de estado del servicio."""
+    """Estado detallado del servicio."""
     return {
         "service_name": SERVICE_NAME,
         "service_port": SERVICE_PORT,
@@ -418,6 +474,24 @@ async def service_status():
             "background_processing": True,
             "sync_processing": True
         },
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/debug/env")
+async def debug_environment():
+    """Endpoint de diagnóstico para verificar variables de entorno (sin exponer valores)."""
+    env_vars = {
+        "OPENAI_API_KEY": "✅ Configurada" if os.getenv("OPENAI_API_KEY") else "❌ Faltante",
+        "SUPABASE_URL": "✅ Configurada" if os.getenv("SUPABASE_URL") else "❌ Faltante", 
+        "SUPABASE_SERVICE_KEY": "✅ Configurada" if os.getenv("SUPABASE_SERVICE_KEY") else "❌ Faltante",
+        "LLAMA_CLOUD_API_KEY": "✅ Configurada" if os.getenv("LLAMA_CLOUD_API_KEY") else "❌ Faltante",
+        "SERPER_API_KEY": "✅ Configurada" if os.getenv("SERPER_API_KEY") else "❌ Faltante"
+    }
+    
+    return {
+        "service": "crewai_analysis_service",
+        "environment_variables": env_vars,
+        "crewai_available": CREWAI_AVAILABLE,
         "timestamp": datetime.now().isoformat()
     }
 
