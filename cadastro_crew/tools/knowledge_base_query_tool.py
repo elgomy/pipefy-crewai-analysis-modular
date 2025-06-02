@@ -1,13 +1,20 @@
 import os
 from typing import Type, Optional
 from pydantic import BaseModel, Field
-from crewai.tools import BaseTool
+try:
+    from crewai.tools import BaseTool
+except ImportError:
+    # Fallback para versiones más nuevas de CrewAI
+    from crewai.tools.base_tool import BaseTool
+from sentence_transformers import SentenceTransformer
+from supabase import create_client, Client as SupabaseClient
+from dotenv import load_dotenv
+import logging
+import numpy as np
 
 # Dependências para a Knowledge Base (exemplo com Supabase/pgvector e SentenceTransformers)
 # pip install supabase sentence-transformers
 # Lembre-se de configurar o Supabase e a extensão pgvector
-from supabase import create_client, Client as SupabaseClient
-from sentence_transformers import SentenceTransformer
 
 # --- Configuração da Knowledge Base (Supabase) ---
 # REMOVER a leitura de variáveis de ambiente daqui

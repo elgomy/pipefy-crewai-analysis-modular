@@ -2,9 +2,13 @@ import os
 import tempfile
 import asyncio
 import httpx # Usado para baixar arquivos de URLs
-from typing import Type, Optional, Literal, List, Any
+from typing import Type, Optional, Literal, List, Any, Union
 from pydantic import BaseModel, Field, validator # MODIFICADO: Usar pydantic (V2)
-from crewai.tools import BaseTool
+try:
+    from crewai.tools import BaseTool
+except ImportError:
+    # Fallback para versiones más nuevas de CrewAI
+    from crewai.tools.base_tool import BaseTool
 from dotenv import load_dotenv
 # import llamacloud # Removido - não é necessário, já que usamos llama_parse diretamente
 import logging # Adicionado para o logger que já existe
