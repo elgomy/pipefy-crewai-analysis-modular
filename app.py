@@ -144,11 +144,44 @@ class AnalysisResult(BaseModel):
     crewai_available: bool
     analysis_details: Optional[Dict[str, Any]] = None
 
-async def download_checklist_content(checklist_url: str) -> str:
-    """Descarga el contenido del checklist desde la URL."""
+async def get_or_parse_checklist_content(checklist_url: str) -> str:
+    """
+    Obtiene el contenido del checklist desde la base de datos si ya está parseado,
+    o lo parsea por primera vez y lo guarda.
+    """
     try:
-        logger.info(f"📥 Descargando contenido del checklist...")
-        logger.info(f"📥 Descargando checklist desde: {checklist_url}")
+        # Primero intentar obtener el contenido ya parseado desde Supabase
+        logger.info(f"🔍 Verificando si el checklist ya está parseado en la base de datos...")
+        
+        # Configurar cliente Supabase
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+        
+        if supabase_url and supabase_key:
+            try:
+                from supabase import create_client
+                supabase = create_client(supabase_url, supabase_key)
+                
+                # Buscar el checklist por URL
+                response = supabase.table("checklist_config").select("checklist_content, parsed_at").eq("checklist_url", checklist_url).execute()
+                
+                if response.data and len(response.data) > 0:
+                    checklist_data = response.data[0]
+                    if checklist_data.get("checklist_content"):
+                        logger.info(f"✅ Checklist ya parseado encontrado en la base de datos (parseado: {checklist_data.get('parsed_at')})")
+                        return checklist_data["checklist_content"]
+                    else:
+                        logger.info(f"📄 Checklist encontrado pero sin contenido parseado - procediendo a parsear...")
+                else:
+                    logger.info(f"📄 Checklist no encontrado en la base de datos - procediendo a parsear...")
+                    
+            except Exception as db_error:
+                logger.warning(f"⚠️ Error al consultar la base de datos: {db_error} - procediendo a parsear directamente...")
+        else:
+            logger.warning(f"⚠️ Credenciales de Supabase no disponibles - procediendo a parsear directamente...")
+        
+        # Si llegamos aquí, necesitamos parsear el checklist
+        logger.info(f"📥 Parseando checklist desde: {checklist_url}")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(checklist_url)
@@ -156,13 +189,13 @@ async def download_checklist_content(checklist_url: str) -> str:
             
             # Si es un PDF, usar LlamaParse para extraer texto
             if checklist_url.lower().endswith('.pdf'):
-                logger.info("📄 Archivo PDF detectado - extrayendo texto...")
+                logger.info("📄 Archivo PDF detectado - extrayendo texto con LlamaParse...")
                 
                 # Verificar si LlamaParse está disponible
                 llama_api_key = os.getenv("LLAMA_CLOUD_API_KEY")
                 if not llama_api_key:
                     logger.warning("⚠️ LLAMA_CLOUD_API_KEY no configurada - usando contenido simulado...")
-                    return """
+                    content = """
 CHECKLIST DE CADASTRO PESSOA JURÍDICA
 
 1. DOCUMENTOS OBRIGATÓRIOS:
@@ -178,48 +211,47 @@ CHECKLIST DE CADASTRO PESSOA JURÍDICA
    - Assinaturas devem estar presentes
    - Informações devem ser consistentes entre documentos
                     """
-                
-                try:
-                    # Intentar usar LlamaParse
-                    from llama_parse import LlamaParse
-                    import tempfile
-                    
-                    # Guardar el PDF temporalmente
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-                        temp_file.write(response.content)
-                        temp_file_path = temp_file.name
-                    
-                    # Usar LlamaParse para extraer el contenido
-                    parser = LlamaParse(
-                        api_key=llama_api_key,
-                        result_type="markdown",
-                        language="pt"
-                    )
-                    
-                    documents = await parser.aload_data(temp_file_path)
-                    
-                    # Limpiar archivo temporal
-                    os.unlink(temp_file_path)
-                    
-                    if documents:
-                        content = "\n\n".join([doc.text for doc in documents if doc.text])
-                        logger.info(f"📄 Contenido extraído con LlamaParse: {len(content)} caracteres")
-                        return content
-                    else:
-                        logger.warning("⚠️ LlamaParse no retornó contenido - usando fallback")
-                        return "Error: No se pudo extraer contenido del PDF con LlamaParse"
+                else:
+                    try:
+                        # Intentar usar LlamaParse
+                        from llama_parse import LlamaParse
+                        import tempfile
                         
-                except Exception as llama_error:
-                    logger.error(f"❌ Error con LlamaParse: {llama_error}")
-                    logger.warning("⚠️ Fallback a contenido simulado debido a error de LlamaParse")
-                    return """
+                        # Guardar el PDF temporalmente
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                            temp_file.write(response.content)
+                            temp_file_path = temp_file.name
+                        
+                        # Usar LlamaParse para extraer el contenido
+                        parser = LlamaParse(
+                            api_key=llama_api_key,
+                            result_type="markdown",
+                            language="pt"
+                        )
+                        
+                        documents = await parser.aload_data(temp_file_path)
+                        
+                        # Limpiar archivo temporal
+                        os.unlink(temp_file_path)
+                        
+                        if documents:
+                            content = "\n\n".join([doc.text for doc in documents if doc.text])
+                            logger.info(f"📄 Contenido extraído con LlamaParse: {len(content)} caracteres")
+                        else:
+                            logger.warning("⚠️ LlamaParse no retornó contenido - usando fallback")
+                            content = "Error: No se pudo extraer contenido del PDF con LlamaParse"
+                            
+                    except Exception as llama_error:
+                        logger.error(f"❌ Error con LlamaParse: {llama_error}")
+                        logger.warning("⚠️ Fallback a contenido simulado debido a error de LlamaParse")
+                        content = """
 CHECKLIST DE CADASTRO PESSOA JURÍDICA
 
 1. DOCUMENTOS OBRIGATÓRIOS:
    - Contrato Social atualizado
    - Comprovante de residência da empresa
    - Documento de identidade dos sócios
-   - Declaração de impostos (último ano)
+   - Declaração de impostos (último año)
    - Certificado de registro na junta comercial
 
 2. CRITÉRIOS DE VALIDAÇÃO:
@@ -227,115 +259,151 @@ CHECKLIST DE CADASTRO PESSOA JURÍDICA
    - Datas não podem estar vencidas
    - Assinaturas devem estar presentes
    - Informações devem ser consistentes entre documentos
-                    """
+                        """
             else:
+                # Para otros tipos de archivo
                 content = response.text
-                logger.info(f"📄 Contenido del checklist descargado: {len(content)} caracteres")
-                return content
+                logger.info(f"📄 Contenido de texto extraído: {len(content)} caracteres")
+        
+        # Guardar el contenido parseado en la base de datos para futuras consultas
+        if supabase_url and supabase_key and content:
+            try:
+                from datetime import datetime
                 
+                # Actualizar o insertar el contenido parseado
+                update_data = {
+                    "checklist_content": content,
+                    "parsed_at": datetime.now().isoformat(),
+                    "parsing_version": "1.0"
+                }
+                
+                # Intentar actualizar primero
+                update_response = supabase.table("checklist_config").update(update_data).eq("checklist_url", checklist_url).execute()
+                
+                if update_response.data:
+                    logger.info(f"✅ Contenido del checklist guardado en la base de datos")
+                else:
+                    logger.warning(f"⚠️ No se pudo actualizar el checklist en la base de datos")
+                    
+            except Exception as save_error:
+                logger.warning(f"⚠️ Error al guardar el contenido parseado: {save_error}")
+        
+        return content
+        
     except Exception as e:
-        logger.error(f"❌ Error al descargar checklist: {e}")
-        return f"Error al descargar checklist desde {checklist_url}: {e}"
+        logger.error(f"❌ Error al obtener/parsear checklist: {e}")
+        # Fallback a contenido básico
+        return """
+CHECKLIST DE CADASTRO PESSOA JURÍDICA - FALLBACK
 
-async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> AnalysisResult:
-    """Analiza documentos usando CrewAI."""
+1. DOCUMENTOS OBRIGATÓRIOS:
+   - Contrato Social
+   - Comprovante de residência
+   - Documentos dos sócios
+   - Declarações fiscais
+
+2. CRITÉRIOS:
+   - Documentos legíveis
+   - Informações consistentes
+        """
+
+async def download_and_parse_client_documents(documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Descarga y parsea los documentos del cliente usando LlamaParse.
+    Retorna una lista de documentos con su contenido parseado.
+    """
+    parsed_documents = []
+    
+    logger.info(f"📄 Iniciando parseo de {len(documents)} documentos del cliente...")
+    
+    for doc in documents:
+        try:
+            doc_name = doc.get("name", "documento_sin_nombre")
+            doc_url = doc.get("url", "")
+            doc_tag = doc.get("document_tag", "sin_tag")
+            
+            if not doc_url:
+                logger.warning(f"⚠️ Documento {doc_name} no tiene URL - saltando...")
+                continue
+                
+            logger.info(f"📥 Parseando documento: {doc_name} desde {doc_url}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(doc_url)
+                response.raise_for_status()
+                
+                content = ""
+                
+                # Si es un PDF, usar LlamaParse
+                if doc_url.lower().endswith('.pdf'):
+                    logger.info(f"📄 Documento PDF detectado: {doc_name}")
+                    
+                    llama_api_key = os.getenv("LLAMA_CLOUD_API_KEY")
+                    if llama_api_key:
+                        try:
+                            from llama_parse import LlamaParse
+                            import tempfile
+                            
+                            # Guardar el PDF temporalmente
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                                temp_file.write(response.content)
+                                temp_file_path = temp_file.name
+                            
+                            # Usar LlamaParse para extraer el contenido
+                            parser = LlamaParse(
+                                api_key=llama_api_key,
+                                result_type="markdown",
+                                language="pt"
+                            )
+                            
+                            documents_parsed = await parser.aload_data(temp_file_path)
+                            
+                            # Limpiar archivo temporal
+                            os.unlink(temp_file_path)
+                            
+                            if documents_parsed:
+                                content = "\n\n".join([d.text for d in documents_parsed if d.text])
+                                logger.info(f"✅ Documento {doc_name} parseado: {len(content)} caracteres")
+                            else:
+                                logger.warning(f"⚠️ No se pudo extraer contenido de {doc_name}")
+                                content = f"[Error: No se pudo parsear el documento {doc_name}]"
+                                
+                        except Exception as parse_error:
+                            logger.error(f"❌ Error parseando {doc_name}: {parse_error}")
+                            content = f"[Error parseando {doc_name}: {str(parse_error)}]"
+                    else:
+                        logger.warning(f"⚠️ LLAMA_CLOUD_API_KEY no disponible para parsear {doc_name}")
+                        content = f"[Documento PDF {doc_name} - contenido no disponible sin LlamaParse]"
+                else:
+                    # Para otros tipos de archivo
+                    content = response.text
+                    logger.info(f"✅ Documento de texto {doc_name}: {len(content)} caracteres")
+                
+                # Agregar el documento parseado
+                parsed_documents.append({
+                    "name": doc_name,
+                    "url": doc_url,
+                    "document_tag": doc_tag,
+                    "content": content,
+                    "original_metadata": doc
+                })
+                
+        except Exception as doc_error:
+            logger.error(f"❌ Error procesando documento {doc.get('name', 'unknown')}: {doc_error}")
+            parsed_documents.append({
+                "name": doc.get("name", "documento_error"),
+                "url": doc.get("url", ""),
+                "document_tag": doc.get("document_tag", "error"),
+                "content": f"[Error: No se pudo procesar el documento - {str(doc_error)}]",
+                "original_metadata": doc
+            })
+    
+    logger.info(f"✅ Parseo completado: {len(parsed_documents)} documentos procesados")
+    return parsed_documents
+
+async def save_analysis_results(analysis_result: AnalysisResult):
+    """Guarda los resultados del análisis en archivos y prepara para Supabase."""
     try:
-        logger.info(f"🔍 Iniciando análisis CrewAI para case_id: {request.case_id}")
-        logger.info(f"📄 Documentos a analizar: {len(request.documents)}")
-        logger.info(f"📋 Checklist URL: {request.checklist_url}")
-        
-        if not CREWAI_AVAILABLE:
-            logger.warning("⚠️ CrewAI no disponible - ejecutando análisis simulado")
-            
-            # Análisis simulado detallado
-            simulated_analysis = {
-                "compliance_score": 85.5,
-                "missing_documents": ["comprovante_residencia", "declaracao_impostos"],
-                "document_analysis": [
-                    {
-                        "document": doc["name"],
-                        "tag": doc["document_tag"],
-                        "status": "compliant" if "contrato" in doc["name"].lower() else "needs_review",
-                        "confidence": 0.92
-                    }
-                    for doc in request.documents
-                ],
-                "recommendations": [
-                    "Solicitar comprovante de residência atualizado",
-                    "Verificar declaração de impostos do último ano",
-                    "Confirmar assinatura digital nos contratos"
-                ]
-            }
-            
-            simulated_result = AnalysisResult(
-                case_id=request.case_id,
-                status="simulated_success",
-                message=f"Análisis simulado completado para {len(request.documents)} documentos",
-                timestamp=datetime.now().isoformat(),
-                documents_analyzed=len(request.documents),
-                crewai_available=False,
-                analysis_details=simulated_analysis
-            )
-            
-            # 💾 GUARDAR RESULTADOS SIMULADOS EN ARCHIVOS
-            logger.info(f"💾 Guardando resultados del análisis simulado...")
-            
-            # Guardar en Markdown
-            markdown_path = await save_analysis_result_to_markdown(simulated_result)
-            if markdown_path:
-                logger.info(f"📄 Resultado Simulado Markdown: {markdown_path}")
-            
-            # Guardar en JSON
-            json_path = await save_analysis_result_to_json(simulated_result)
-            if json_path:
-                logger.info(f"📄 Resultado Simulado JSON: {json_path}")
-            
-            # Preparar para futura tabla Supabase
-            await save_analysis_result_to_supabase(simulated_result)
-            
-            return simulated_result
-        
-        # Descargar contenido del checklist
-        logger.info("📥 Descargando contenido del checklist...")
-        checklist_content = await download_checklist_content(request.checklist_url)
-        
-        # Preparar inputs para la crew
-        crew_inputs = {
-            "case_id": request.case_id,
-            "checklist": checklist_content,  # Contenido del checklist, no URL
-            "current_date": request.current_date,
-            "documents": request.documents
-        }
-        
-        # Crear instancia de la crew
-        crew = CadastroCrew(inputs=crew_inputs)
-        
-        logger.info(f"🚀 Ejecutando CrewAI con {len(request.documents)} documentos...")
-        
-        # Ejecutar la crew
-        result = crew.run()
-        
-        logger.info(f"✅ Análisis CrewAI completado para case_id: {request.case_id}")
-        
-        # Procesar resultado de CrewAI
-        analysis_details = {
-            "crew_result": str(result),
-            "execution_time": datetime.now().isoformat(),
-            "documents_processed": len(request.documents),
-            "checklist_used": request.checklist_url
-        }
-        
-        analysis_result = AnalysisResult(
-            case_id=request.case_id,
-            status="success",
-            message=f"Análisis CrewAI completado exitosamente para {len(request.documents)} documentos",
-            timestamp=datetime.now().isoformat(),
-            documents_analyzed=len(request.documents),
-            crewai_available=True,
-            analysis_details=analysis_details
-        )
-        
-        # 💾 GUARDAR RESULTADOS EN ARCHIVOS
         logger.info(f"💾 Guardando resultados del análisis...")
         
         # Guardar en Markdown
@@ -351,18 +419,79 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
         # Preparar para futura tabla Supabase
         await save_analysis_result_to_supabase(analysis_result)
         
+    except Exception as e:
+        logger.error(f"❌ Error guardando resultados: {e}")
+
+async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> AnalysisResult:
+    """Analiza documentos usando CrewAI con el contenido real parseado."""
+    try:
+        logger.info(f"🔍 Iniciando análisis CrewAI para case_id: {request.case_id}")
+        logger.info(f"📄 Documentos a analizar: {len(request.documents)}")
+        logger.info(f"📋 Checklist URL: {request.checklist_url}")
+        
+        # 1. Obtener contenido del checklist (desde cache o parseando)
+        logger.info("📥 Obteniendo contenido del checklist...")
+        checklist_content = await get_or_parse_checklist_content(request.checklist_url)
+        
+        # 2. Parsear documentos del cliente
+        logger.info("📄 Parseando documentos del cliente...")
+        parsed_client_documents = await download_and_parse_client_documents(request.documents)
+        
+        # 3. Preparar inputs para la crew con contenido real
+        crew_inputs = {
+            "case_id": request.case_id,
+            "pipe_id": request.pipe_id,
+            "current_date": request.current_date,
+            "checklist_content": checklist_content,
+            "client_documents": parsed_client_documents,
+            "documents_metadata": request.documents  # Mantener metadata original también
+        }
+        
+        logger.info(f"🚀 Ejecutando CrewAI con {len(parsed_client_documents)} documentos parseados...")
+        
+        # Ejecutar la crew
+        crew_instance = CadastroCrew()
+        result = crew_instance.crew().kickoff(inputs=crew_inputs)
+        
+        logger.info(f"✅ Análisis CrewAI completado para case_id: {request.case_id}")
+        
+        # Preparar resultado
+        analysis_result = AnalysisResult(
+            case_id=request.case_id,
+            pipe_id=request.pipe_id,
+            status="completed",
+            analysis_details={
+                "crew_result": str(result),
+                "documents_analyzed": len(parsed_client_documents),
+                "checklist_used": request.checklist_url,
+                "analysis_timestamp": datetime.now().isoformat(),
+                "documents_content_summary": [
+                    {
+                        "name": doc["name"],
+                        "tag": doc["document_tag"],
+                        "content_length": len(doc["content"]),
+                        "parsed_successfully": not doc["content"].startswith("[Error")
+                    }
+                    for doc in parsed_client_documents
+                ]
+            }
+        )
+        
+        # Guardar resultados
+        await save_analysis_results(analysis_result)
+        
         return analysis_result
         
     except Exception as e:
         logger.error(f"❌ Error en análisis CrewAI para case_id {request.case_id}: {e}")
         return AnalysisResult(
             case_id=request.case_id,
+            pipe_id=request.pipe_id,
             status="error",
-            message=f"Error en análisis CrewAI: {str(e)}",
-            timestamp=datetime.now().isoformat(),
-            documents_analyzed=0,
-            crewai_available=CREWAI_AVAILABLE,
-            analysis_details={"error": str(e)}
+            analysis_details={
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
         )
 
 # 🔗 ENDPOINT PRINCIPAL PARA COMUNICACIÓN HTTP DIRECTA
