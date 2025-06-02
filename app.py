@@ -455,16 +455,19 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
         
         logger.info(f"✅ Análisis CrewAI completado para case_id: {request.case_id}")
         
-        # Preparar resultado
+        # Preparar resultado con TODOS los campos requeridos
         analysis_result = AnalysisResult(
             case_id=request.case_id,
-            pipe_id=request.pipe_id,
             status="completed",
+            message=f"Análisis CrewAI completado exitosamente para {len(parsed_client_documents)} documentos",
+            timestamp=datetime.now().isoformat(),
+            documents_analyzed=len(parsed_client_documents),
+            crewai_available=CREWAI_AVAILABLE,
             analysis_details={
                 "crew_result": str(result),
-                "documents_analyzed": len(parsed_client_documents),
                 "checklist_used": request.checklist_url,
                 "analysis_timestamp": datetime.now().isoformat(),
+                "pipe_id": request.pipe_id,
                 "documents_content_summary": [
                     {
                         "name": doc["name"],
@@ -486,8 +489,11 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
         logger.error(f"❌ Error en análisis CrewAI para case_id {request.case_id}: {e}")
         return AnalysisResult(
             case_id=request.case_id,
-            pipe_id=request.pipe_id,
             status="error",
+            message=f"Error en análisis CrewAI: {str(e)}",
+            timestamp=datetime.now().isoformat(),
+            documents_analyzed=0,
+            crewai_available=CREWAI_AVAILABLE,
             analysis_details={
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
