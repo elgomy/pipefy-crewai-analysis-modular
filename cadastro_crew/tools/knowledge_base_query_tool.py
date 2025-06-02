@@ -1,11 +1,7 @@
 import os
 from typing import Type, Optional
 from pydantic import BaseModel, Field
-try:
-    from crewai.tools import BaseTool
-except ImportError:
-    # Fallback para versiones más nuevas de CrewAI
-    from crewai.tools.base_tool import BaseTool
+from crewai.tools import BaseTool
 from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client as SupabaseClient
 from dotenv import load_dotenv

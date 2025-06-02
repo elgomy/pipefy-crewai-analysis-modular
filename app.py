@@ -35,7 +35,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 
 # Verificar variables de entorno críticas
 logger.info("🔍 Verificando variables de entorno...")
-required_env_vars = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_KEY"]
+required_env_vars = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"]
 missing_vars = []
 
 for var in required_env_vars:
