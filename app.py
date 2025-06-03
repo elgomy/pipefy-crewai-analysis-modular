@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Servicio CrewAI - Versión HTTP Directa
+Servicio CrewAI - Versión HTTP Direct
 Se enfoca únicamente en el análisis de documentos usando CrewAI.
 Recibe llamadas HTTP directas del servicio de ingestión de documentos.
 MANTIENE LA MODULARIDAD: Cada servicio tiene su responsabilidad específica.
@@ -57,8 +57,13 @@ class CrewAIAnalysisRequest(BaseModel):
 
 class AnalysisResult(BaseModel):
     case_id: str
+    pipe_id: Optional[str] = None
     status: str
     message: str
+    risk_score: Optional[str] = None  # "Alto", "Medio", "Bajo"
+    risk_score_numeric: Optional[int] = None  # 0-100
+    full_analysis_report: Optional[str] = None  # Informe completo en markdown
+    summary_report: Optional[str] = None  # Resumen para Pipefy
     timestamp: str
     documents_analyzed: int
     crewai_available: bool
@@ -137,8 +142,13 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
             
             simulated_result = AnalysisResult(
                 case_id=request.case_id,
+                pipe_id=request.pipe_id,
                 status="simulated_success",
                 message=f"Análisis simulado completado para {len(request.documents)} documentos",
+                risk_score="Médio",
+                risk_score_numeric=60,
+                full_analysis_report="Análisis simulado - CrewAI no disponible. Score de Risco: Médio. Documentos analizados correctamente.",
+                summary_report=f"Score de Risco: Médio | Análisis simulado completado para {len(request.documents)} documentos | Verificar documentos faltantes",
                 timestamp=datetime.now().isoformat(),
                 documents_analyzed=len(request.documents),
                 crewai_available=False,
@@ -186,8 +196,16 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
         logger.info(f"✅ Análisis CrewAI completado para case_id: {request.case_id}")
         
         # Procesar resultado de CrewAI
+        crew_result_str = str(result)
+        
+        # Extraer score de riesgo del resultado
+        risk_score, risk_score_numeric = await extract_risk_score_from_analysis(crew_result_str)
+        
+        # Generar resumen para Pipefy
+        summary_report = await generate_summary_report(crew_result_str, risk_score)
+        
         analysis_details = {
-            "crew_result": str(result),
+            "crew_result": crew_result_str,
             "execution_time": datetime.now().isoformat(),
             "documents_processed": len(request.documents),
             "checklist_used": request.checklist_url
@@ -195,8 +213,13 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
         
         analysis_result = AnalysisResult(
             case_id=request.case_id,
+            pipe_id=request.pipe_id,
             status="success",
             message=f"Análisis CrewAI completado exitosamente para {len(request.documents)} documentos",
+            risk_score=risk_score,
+            risk_score_numeric=risk_score_numeric,
+            full_analysis_report=crew_result_str,
+            summary_report=summary_report,
             timestamp=datetime.now().isoformat(),
             documents_analyzed=len(request.documents),
             crewai_available=True,
@@ -234,8 +257,13 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
         
         return AnalysisResult(
             case_id=request.case_id,
+            pipe_id=request.pipe_id,
             status="error",
             message=f"Error en análisis CrewAI: {str(e)}",
+            risk_score="Alto",  # Error = riesgo alto
+            risk_score_numeric=90,
+            full_analysis_report=f"Error en análisis: {str(e)}",
+            summary_report=f"Score de Risco: Alto | Error en análisis: {str(e)[:100]}...",
             timestamp=datetime.now().isoformat(),
             documents_analyzed=0,
             crewai_available=CREWAI_AVAILABLE,
@@ -524,6 +552,101 @@ async def save_analysis_result_to_supabase(result: "AnalysisResult") -> bool:
     except Exception as e:
         logger.error(f"❌ Error preparando datos para Supabase: {e}")
         return False
+
+async def extract_risk_score_from_analysis(crew_result: str) -> tuple[str, int]:
+    """
+    Extrae el score de riesgo del resultado de CrewAI.
+    Busca patrones como "Score de Risco: Alto" o "Risco: Médio" etc.
+    
+    Returns:
+        tuple: (risk_score_text, risk_score_numeric)
+    """
+    try:
+        if not crew_result:
+            return "Médio", 50
+        
+        # Convertir a minúsculas para búsqueda
+        result_lower = crew_result.lower()
+        
+        # Patrones de búsqueda para score de riesgo
+        risk_patterns = [
+            r"score de risco[:\s]*([a-záêçõ]+)",
+            r"risco[:\s]*([a-záêçõ]+)",
+            r"classificação[:\s]*([a-záêçõ]+)",
+            r"nível de risco[:\s]*([a-záêçõ]+)"
+        ]
+        
+        import re
+        
+        for pattern in risk_patterns:
+            match = re.search(pattern, result_lower)
+            if match:
+                risk_text = match.group(1).strip()
+                
+                # Mapear texto a valores numéricos
+                if "alto" in risk_text or "high" in risk_text:
+                    return "Alto", 80
+                elif "médio" in risk_text or "medio" in risk_text or "medium" in risk_text:
+                    return "Médio", 50
+                elif "baixo" in risk_text or "low" in risk_text:
+                    return "Baixo", 20
+        
+        # Si no encuentra patrón específico, analizar contenido general
+        if any(word in result_lower for word in ["crítico", "grave", "urgente", "alto risco"]):
+            return "Alto", 75
+        elif any(word in result_lower for word in ["baixo risco", "conforme", "adequado"]):
+            return "Baixo", 25
+        else:
+            return "Médio", 50
+            
+    except Exception as e:
+        logger.error(f"❌ Error al extraer score de riesgo: {e}")
+        return "Médio", 50
+
+async def generate_summary_report(crew_result: str, risk_score: str) -> str:
+    """
+    Genera un resumen conciso del análisis para mostrar en Pipefy.
+    Máximo 500 caracteres para el campo de observaciones.
+    """
+    try:
+        if not crew_result:
+            return f"Análisis completado. Score de Risco: {risk_score}. Consulte el informe completo para más detalles."
+        
+        # Extraer las primeras líneas más importantes
+        lines = crew_result.split('\n')
+        important_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('#') and len(line) > 10:
+                # Buscar líneas con información clave
+                if any(keyword in line.lower() for keyword in [
+                    'score', 'risco', 'recomendação', 'conclusão', 
+                    'status', 'conformidade', 'documentos'
+                ]):
+                    important_lines.append(line)
+                    if len(important_lines) >= 3:  # Máximo 3 líneas importantes
+                        break
+        
+        # Construir resumen
+        if important_lines:
+            summary = " | ".join(important_lines)
+        else:
+            # Fallback: tomar las primeras líneas no vacías
+            summary = " ".join([line.strip() for line in lines[:3] if line.strip()])
+        
+        # Agregar score de riesgo al final
+        summary = f"Score de Risco: {risk_score} | {summary}"
+        
+        # Truncar si es muy largo (máximo 450 caracteres para dejar espacio)
+        if len(summary) > 450:
+            summary = summary[:447] + "..."
+        
+        return summary
+        
+    except Exception as e:
+        logger.error(f"❌ Error al generar resumen: {e}")
+        return f"Análisis completado. Score de Risco: {risk_score}. Error al generar resumen."
 
 if __name__ == "__main__":
     import uvicorn
