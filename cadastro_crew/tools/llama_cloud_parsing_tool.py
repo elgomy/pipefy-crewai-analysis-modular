@@ -108,8 +108,10 @@ class LlamaParseDirectTool(BaseTool):
                     response.raise_for_status()
                 
                 possible_extension = ""
-                if '.' in file_path_or_url.split('/')[-1]:
-                    possible_extension = "." + file_path_or_url.split('/')[-1].split('.')[-1]
+                # FIX: Limpiar parámetros de consulta (?) antes de extraer la extensión
+                url_without_params = file_path_or_url.split('?')[0]  # Remover parámetros de consulta
+                if '.' in url_without_params.split('/')[-1]:
+                    possible_extension = "." + url_without_params.split('/')[-1].split('.')[-1]
 
                 temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=possible_extension, mode='wb') # mode='wb' para binário
                 temp_file.write(response.content)
@@ -226,8 +228,10 @@ class LlamaParseDirectTool(BaseTool):
                     response.raise_for_status()
                 
                 possible_extension = ""
-                if '.' in source_path.split('/')[-1]:
-                    possible_extension = "." + source_path.split('/')[-1].split('.')[-1]
+                # FIX: Limpiar parámetros de consulta (?) antes de extraer la extensión
+                url_without_params = source_path.split('?')[0]  # Remover parámetros de consulta
+                if '.' in url_without_params.split('/')[-1]:
+                    possible_extension = "." + url_without_params.split('/')[-1].split('.')[-1]
                 
                 # Usar with para garantir o fechamento do arquivo temporário
                 temp_file_obj = tempfile.NamedTemporaryFile(delete=False, suffix=possible_extension, mode='wb')
