@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Servicio CrewAI - Versión HTTP Direct
-Se enfoca únicamente en el análisis de documentos usando CrewAI.
+Servicio CrewAI - Análisis Modular
+Se enfoca ÚNICAMENTE en el análisis de documentos usando CrewAI.
 Recibe llamadas HTTP directas del servicio de ingestión de documentos.
-MANTIENE LA MODULARIDAD: Cada servicio tiene su responsabilidad específica.
+MANTIENE LA MODULARIDAD: Solo análisis, sin dependencias externas.
 """
 
 import os
@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from pathlib import Path
 import json
+from supabase import create_client, Client
 
 # Cargar variables de entorno
 load_dotenv()
@@ -25,13 +26,33 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Variables de entorno para Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
 # Configuración del servicio
-SERVICE_NAME = "CrewAI Analysis Service - HTTP Direct"
+SERVICE_NAME = "CrewAI Analysis Service - Modular"
 SERVICE_PORT = int(os.getenv("CREWAI_SERVICE_PORT", "8002"))
 
 # Directorio para guardar resultados
 RESULTS_DIR = Path("analysis_results")
-RESULTS_DIR.mkdir(exist_ok=True)
+LOGS_DIR = Path("logs")
+
+# Crear directorios si no existen
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Inicializar cliente Supabase
+supabase: Optional[Client] = None
+if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+        logger.info("✅ Cliente Supabase inicializado correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error al inicializar cliente Supabase: {e}")
+        supabase = None
+else:
+    logger.warning("⚠️ Variables de Supabase no configuradas")
 
 # Verificar si CrewAI está disponible
 CREWAI_AVAILABLE = False
@@ -44,7 +65,7 @@ except ImportError as e:
 
 app = FastAPI(
     title=SERVICE_NAME,
-    description="Servicio modular de análisis CrewAI con comunicación HTTP directa"
+    description="Servicio modular de análisis CrewAI - Solo análisis, sin dependencias externas"
 )
 
 # Modelos Pydantic
@@ -60,10 +81,10 @@ class AnalysisResult(BaseModel):
     pipe_id: Optional[str] = None
     status: str
     message: str
-    risk_score: Optional[str] = None  # "Alto", "Medio", "Bajo"
+    risk_score: Optional[str] = None  # "Alto", "Medio", "Baixo"
     risk_score_numeric: Optional[int] = None  # 0-100
     full_analysis_report: Optional[str] = None  # Informe completo en markdown
-    summary_report: Optional[str] = None  # Resumen para Pipefy
+    summary_report: Optional[str] = None  # Resumen para sistemas externos
     timestamp: str
     documents_analyzed: int
     crewai_available: bool
@@ -168,7 +189,7 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
             if json_path:
                 logger.info(f"📄 Resultado Simulado JSON: {json_path}")
             
-            # Preparar para futura tabla Supabase
+            # Guardar en Supabase
             await save_analysis_result_to_supabase(simulated_result)
             
             return simulated_result
@@ -201,7 +222,7 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
         # Extraer score de riesgo del resultado
         risk_score, risk_score_numeric = await extract_risk_score_from_analysis(crew_result_str)
         
-        # Generar resumen para Pipefy
+        # Generar resumen para sistemas externos
         summary_report = await generate_summary_report(crew_result_str, risk_score)
         
         analysis_details = {
@@ -239,7 +260,7 @@ async def analyze_documents_with_crewai(request: CrewAIAnalysisRequest) -> Analy
         if json_path:
             logger.info(f"📄 Resultado JSON: {json_path}")
         
-        # Preparar para futura tabla Supabase
+        # Guardar en Supabase
         await save_analysis_result_to_supabase(analysis_result)
         
         return analysis_result
@@ -332,7 +353,7 @@ async def health_check():
         "status": "healthy",
         "service": "crewai_analysis_service",
         "crewai_available": CREWAI_AVAILABLE,
-        "architecture": "modular_http_direct",
+        "architecture": "modular",
         "communication": "http_direct",
         "endpoints": {
             "async_analysis": "POST /analyze",
@@ -345,12 +366,12 @@ async def health_check():
 @app.get("/")
 async def root():
     return {
-        "service": "CrewAI Analysis Service - HTTP Direct",
-        "description": "Servicio modular de análisis CrewAI con comunicación HTTP directa",
+        "service": "CrewAI Analysis Service - Modular",
+        "description": "Servicio modular de análisis CrewAI - Solo análisis, sin dependencias externas",
         "architecture": "modular",
         "communication": "http_direct",
         "crewai_available": CREWAI_AVAILABLE,
-        "version": "http_direct_v1.0",
+        "version": "modular_v2.0",
         "endpoints": {
             "async_analysis": "POST /analyze - Análisis en background",
             "sync_analysis": "POST /analyze/sync - Análisis síncrono",
@@ -361,26 +382,74 @@ async def root():
 
 @app.get("/status")
 async def service_status():
-    """Endpoint detallado de estado del servicio."""
+    """Estado detallado del servicio."""
     return {
-        "service_name": SERVICE_NAME,
-        "service_port": SERVICE_PORT,
+        "service": SERVICE_NAME,
+        "status": "running",
+        "port": SERVICE_PORT,
         "crewai_available": CREWAI_AVAILABLE,
-        "architecture": "modular_http_direct",
-        "communication_type": "http_direct",
-        "dependencies": {
-            "crewai": CREWAI_AVAILABLE,
-            "httpx": True,
-            "fastapi": True
+        "supabase_connected": supabase is not None,
+        "communication": "http_direct",
+        "architecture": "modular",
+        "timestamp": datetime.now().isoformat(),
+        "integrations": {
+            "supabase": {
+                "connected": supabase is not None,
+                "url": SUPABASE_URL[:50] + "..." if SUPABASE_URL else None
+            }
         },
-        "capabilities": {
-            "document_analysis": True,
-            "checklist_processing": True,
-            "background_processing": True,
-            "sync_processing": True
-        },
-        "timestamp": datetime.now().isoformat()
+        "endpoints": {
+            "analyze": "/analyze (POST) - Análisis asíncrono",
+            "analyze_sync": "/analyze/sync (POST) - Análisis síncrono", 
+            "health": "/health (GET) - Health check",
+            "status": "/status (GET) - Estado del servicio",
+            "informes": "/informes (GET) - Consultar informes guardados",
+            "informe": "/informe/{case_id} (GET) - Consultar informe específico"
+        }
     }
+
+@app.get("/informes")
+async def get_all_informes():
+    """Consulta todos los informes guardados en la tabla informe_cadastro."""
+    try:
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Cliente Supabase no disponible")
+        
+        response = supabase.table("informe_cadastro").select("*").order("created_at", desc=True).execute()
+        
+        return {
+            "status": "success",
+            "count": len(response.data),
+            "informes": response.data
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error al consultar informes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/informe/{case_id}")
+async def get_informe_by_case_id(case_id: str):
+    """Consulta el informe específico de un case_id."""
+    try:
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Cliente Supabase no disponible")
+        
+        response = supabase.table("informe_cadastro").select("*").eq("case_id", case_id).order("created_at", desc=True).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail=f"No se encontró informe para case_id: {case_id}")
+        
+        return {
+            "status": "success",
+            "case_id": case_id,
+            "informe": response.data[0]  # Más reciente
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error al consultar informe para case_id {case_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def save_analysis_result_to_markdown(result: "AnalysisResult") -> str:
     """Guarda el resultado del análisis en un archivo Markdown."""
@@ -491,8 +560,8 @@ async def save_analysis_result_to_json(result: "AnalysisResult") -> str:
             "crewai_available": result.crewai_available,
             "analysis_details": result.analysis_details,
             "created_at": datetime.now().isoformat(),
-            "service_version": "http_direct_v1.0",
-            "architecture": "modular_http_direct"
+            "service_version": "modular_v2.0",
+            "architecture": "modular"
         }
         
         # Guardar archivo JSON
@@ -506,51 +575,56 @@ async def save_analysis_result_to_json(result: "AnalysisResult") -> str:
         logger.error(f"❌ Error al guardar resultado en JSON: {e}")
         return ""
 
-async def prepare_for_supabase_table(result: "AnalysisResult") -> Dict[str, Any]:
-    """Prepara los datos del resultado para futura inserción en tabla Supabase."""
-    return {
-        "case_id": result.case_id,
-        "status": result.status,
-        "message": result.message,
-        "timestamp": result.timestamp,
-        "documents_analyzed": result.documents_analyzed,
-        "crewai_available": result.crewai_available,
-        "analysis_details": json.dumps(result.analysis_details) if result.analysis_details else None,
-        "created_at": datetime.now().isoformat(),
-        "service_version": "http_direct_v1.0",
-        "architecture": "modular_http_direct"
-    }
-
-# TODO: Función para futura implementación con Supabase
 async def save_analysis_result_to_supabase(result: "AnalysisResult") -> bool:
     """
-    FUNCIÓN FUTURA: Guardará el resultado del análisis en una tabla de Supabase.
+    Guarda el resultado del análisis en la tabla informe_cadastro de Supabase.
+    MODULAR: Solo guarda en Supabase, no actualiza sistemas externos.
     
-    Estructura de tabla sugerida 'analysis_results':
+    Estructura de tabla 'informe_cadastro':
     - id (uuid, primary key)
-    - case_id (text)
-    - status (text)
-    - message (text)
-    - timestamp (timestamptz)
-    - documents_analyzed (integer)
-    - crewai_available (boolean)
-    - analysis_details (jsonb)
-    - created_at (timestamptz)
-    - service_version (text)
-    - architecture (text)
+    - case_id (text) - ID del caso/cliente que coincide con case_id de la tabla documents
+    - informe (text) - Informe completo generado por la crew en formato markdown
+    - risk_score (text) - Score de riesgo categórico (Bajo, Medio, Alto)
+    - risk_score_numeric (integer) - Score de riesgo numérico (0-100)
+    - summary_report (text) - Resumen del informe para sistemas externos
+    - documents_analyzed (integer) - Número de documentos analizados
+    - crewai_available (boolean) - Si CrewAI estaba disponible
+    - analysis_details (jsonb) - Detalles adicionales del análisis en formato JSON
+    - status (text) - Estado del análisis
+    - created_at (timestamptz) - Fecha de creación
+    - updated_at (timestamptz) - Fecha de última actualización
     """
     try:
-        # Preparar datos
-        data = await prepare_for_supabase_table(result)
+        if not supabase:
+            logger.error("❌ Cliente Supabase no está disponible")
+            return False
         
-        # TODO: Implementar inserción en Supabase cuando esté listo
-        # supabase_client.table("analysis_results").insert(data).execute()
+        # Preparar datos para insertar en la tabla informe_cadastro
+        data = {
+            "case_id": result.case_id,
+            "informe": result.full_analysis_report or result.message,
+            "risk_score": result.risk_score,
+            "risk_score_numeric": result.risk_score_numeric,
+            "summary_report": result.summary_report,
+            "documents_analyzed": result.documents_analyzed,
+            "crewai_available": result.crewai_available,
+            "analysis_details": result.analysis_details,
+            "status": result.status
+        }
         
-        logger.info(f"🔮 FUTURO: Datos preparados para Supabase - case_id: {result.case_id}")
-        return True
+        # Insertar en Supabase
+        response = supabase.table("informe_cadastro").insert(data).execute()
+        
+        if response.data:
+            logger.info(f"✅ Informe guardado en Supabase - case_id: {result.case_id}, id: {response.data[0].get('id')}")
+            logger.info(f"🔔 Webhook de Supabase se activará automáticamente para actualizar sistemas externos")
+            return True
+        else:
+            logger.error(f"❌ Error al guardar informe en Supabase - No se recibieron datos")
+            return False
         
     except Exception as e:
-        logger.error(f"❌ Error preparando datos para Supabase: {e}")
+        logger.error(f"❌ Error al guardar informe en Supabase: {e}")
         return False
 
 async def extract_risk_score_from_analysis(crew_result: str) -> tuple[str, int]:
@@ -605,8 +679,8 @@ async def extract_risk_score_from_analysis(crew_result: str) -> tuple[str, int]:
 
 async def generate_summary_report(crew_result: str, risk_score: str) -> str:
     """
-    Genera un resumen conciso del análisis para mostrar en Pipefy.
-    Máximo 500 caracteres para el campo de observaciones.
+    Genera un resumen conciso del análisis para sistemas externos.
+    Máximo 500 caracteres para compatibilidad con sistemas externos.
     """
     try:
         if not crew_result:

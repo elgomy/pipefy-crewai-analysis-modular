@@ -1,0 +1,45 @@
+# ===================================
+# CONFIGURACIÓN DEL MÓDULO CREWAI
+# ===================================
+
+# Puerto del servicio CrewAI
+CREWAI_SERVICE_PORT=8002
+
+# ===================================
+# CONFIGURACIÓN DE SUPABASE
+# ===================================
+
+# URL del proyecto Supabase
+SUPABASE_URL=https://your-project-id.supabase.co
+
+# Service Key de Supabase (para operaciones del servidor)
+SUPABASE_SERVICE_KEY=your-service-key-here
+
+# ===================================
+# CONFIGURACIÓN DE OPENAI
+# ===================================
+
+# API Key de OpenAI para CrewAI
+OPENAI_API_KEY=your-openai-api-key-here
+
+# ===================================
+# CONFIGURACIÓN DE LLAMA PARSE
+# ===================================
+
+# API Key de LlamaParse para parseo de documentos
+LLAMA_CLOUD_API_KEY=your-llama-cloud-api-key-here
+
+# ===================================
+# CONFIGURACIÓN DE LOGGING
+# ===================================
+
+# Nivel de logging (DEBUG, INFO, WARNING, ERROR)
+LOG_LEVEL=INFO
+
+# ===================================
+# CONFIGURACIÓN DE CREW
+# ===================================
+
+# Configuración específica de la crew
+CREW_VERBOSE=true
+CREW_MEMORY=true 
