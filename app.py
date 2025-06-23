@@ -724,4 +724,4 @@ async def generate_summary_report(crew_result: str, risk_score: str) -> str:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=SERVICE_PORT) 
+    uvicorn.run(app, host="0.0.0.0", port=SERVICE_PORT) # FORCE REDEPLOY Mon Jun 23 16:16:01 -03 2025
