@@ -59,3 +59,4 @@ Ver `requirements.txt` para la lista completa de dependencias incluyendo CrewAI,
 # pipefy-crewai-analysis-modular
 🤖 Servicio modular CrewAI para análisis inteligente de documentos
 >>>>>>> fa681ad931275845faf8c6b9d5b555b591059622
+# Force redeploy Mon Jun 23 16:11:57 -03 2025
